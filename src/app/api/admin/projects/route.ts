@@ -1,0 +1,12 @@
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { desc, eq } from 'drizzle-orm';
+import { db } from '@/lib/db';
+import { projects } from '@/lib/schema';
+import { requireAdmin } from '@/lib/auth';
+import { slugify } from '@/lib/slug';
+const schema=z.object({title:z.string().min(1).max(160),slug:z.string().max(180).optional(),description:z.string().max(5000).optional(),categoryId:z.string().uuid().nullable().optional(),thumbnail:z.string().url().or(z.string().regex(/^\/demo\/[a-z0-9-]+\.svg$/)).or(z.literal('')).optional(),videoUrl:z.string().url().or(z.literal('')).optional(),featured:z.boolean().optional(),published:z.boolean().optional(),sortOrder:z.number().int().optional()});
+export async function GET(){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});if(!db)return NextResponse.json([]);return NextResponse.json(await db.select().from(projects).orderBy(desc(projects.updatedAt)));}
+export async function POST(req:Request){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});try{const v=schema.parse(await req.json());if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});const [item]=await db.insert(projects).values({...v,slug:slugify(v.slug||v.title),description:v.description||''}).returning();return NextResponse.json(item,{status:201});}catch{return NextResponse.json({error:'Invalid project or slug already exists.'},{status:400});}}
+export async function PATCH(req:Request){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});try{const {id,...input}=await req.json();const v=schema.partial().parse(input);if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});const [item]=await db.update(projects).set({...v,...(v.slug||v.title?{slug:slugify(v.slug||v.title!)}:{}),updatedAt:new Date()}).where(eq(projects.id,id)).returning();return item?NextResponse.json(item):NextResponse.json({error:'Project not found.'},{status:404});}catch{return NextResponse.json({error:'Invalid project details.'},{status:400});}}
+export async function DELETE(req:Request){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});try{const {id}=await req.json();if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});await db.delete(projects).where(eq(projects.id,id));return NextResponse.json({ok:true});}catch{return NextResponse.json({error:'Could not delete project.'},{status:400});}}
