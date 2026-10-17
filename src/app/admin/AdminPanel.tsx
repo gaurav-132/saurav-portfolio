@@ -123,7 +123,7 @@ export default function AdminPanel() {
     <label>Password<input name="password" required type="password" minLength={setup ? 12 : 1} autoComplete={setup ? 'new-password' : 'current-password'} placeholder={setup ? 'At least 12 characters' : 'Enter your password'} /></label>
     <button className="pill primary auth-submit" type="submit">{setup ? 'Create administrator' : 'Sign in'} <span aria-hidden="true">↗</span></button>
     <div className="auth-links"><button className="quiet" type="button" onClick={toggleSetup}>{setup ? 'Back to sign in' : 'First time? Configure the initial admin'}</button><button className="quiet" type="button" onClick={() => { setCategories(demoCategories); setPreview(true); }}>Preview the dashboard (read-only)</button></div>
-  </form></div>;
+  </form><style jsx>{adminStyles}</style></div>;
 
   const sections: { id: Section; title: string; icon: string }[] = [{ id: 'overview', title: 'Overview', icon: '⌂' }, { id: 'works', title: 'Works & videos', icon: '▣' }, { id: 'categories', title: 'Categories', icon: '◇' }, { id: 'queries', title: 'Queries', icon: '✉' }];
   const projectColumns: Column<Project>[] = [
