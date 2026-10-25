@@ -16,6 +16,7 @@
     "@aws-sdk/client-s3": "^3.850.0",
     "@aws-sdk/s3-request-presigner": "^3.850.0",
     "bcryptjs": "^3.0.2",
+    "dotenv": "^18.0.9",
     "drizzle-orm": "^0.44.2",
     "iron-session": "^8.0.4",
     "next": "^15.4.5",
