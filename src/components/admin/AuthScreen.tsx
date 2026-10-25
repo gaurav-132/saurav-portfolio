@@ -39,9 +39,9 @@ export default function AuthScreen({
             name="password"
             required
             type="password"
-            minLength={setup ? 12 : 1}
+            minLength={setup ? 8 : 1}
             autoComplete={setup ? 'new-password' : 'current-password'}
-            placeholder={setup ? 'At least 12 characters' : 'Enter your password'}
+            placeholder={setup ? 'At least 8 characters' : 'Enter your password'}
           />
         </label>
         <button className="pill primary auth-submit" type="submit">{setup ? 'Create administrator' : 'Sign in'} <span>↗</span></button>

@@ -9,7 +9,7 @@ import { jsonError, jsonOk } from '@/lib/http';
 const bodySchema = z.object({
   token: z.string().min(1),
   email: z.email(),
-  password: z.string().min(12).max(128),
+  password: z.string().min(8).max(128),
 });
 
 function unavailable(message: string) {
