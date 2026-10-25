@@ -46,8 +46,8 @@ export default function AuthScreen({
         </label>
         <button className="pill primary auth-submit" type="submit">{setup ? 'Create administrator' : 'Sign in'} <span>↗</span></button>
         <div className="auth-links">
-          <button className="quiet" type="button" onClick={onToggleSetup}>{setup ? 'Back to sign in' : 'First time? Configure the initial admin'}</button>
-          <button className="quiet" type="button" onClick={onPreview}>Preview the dashboard (read-only)</button>
+          {/* <button className="quiet" type="button" onClick={onToggleSetup}>{setup ? 'Back to sign in' : 'First time? Configure the initial admin'}</button>
+          <button className="quiet" type="button" onClick={onPreview}>Preview the dashboard (read-only)</button> */}
         </div>
       </form>
     </div>
