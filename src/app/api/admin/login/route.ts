@@ -1,9 +1,39 @@
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
 import bcrypt from 'bcryptjs';
 import { eq } from 'drizzle-orm';
-import { db } from '@/lib/db';
-import { admins } from '@/lib/schema';
+import { z } from 'zod';
+import { db } from '@/db/client';
+import { admins } from '@/db/schema';
 import { getSession } from '@/lib/auth';
-const attempts=new Map<string,{n:number,at:number}>();
-export async function POST(req:Request){const ip=req.headers.get('x-forwarded-for')?.split(',')[0]||'unknown';const now=Date.now();const a=attempts.get(ip);if(a&&now-a.at<15*60_000&&a.n>=8)return NextResponse.json({error:'Too many attempts. Try again in 15 minutes.'},{status:429});try{const b=z.object({email:z.email(),password:z.string().min(1).max(128)}).parse(await req.json());if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});const [admin]=await db.select().from(admins).where(eq(admins.email,b.email.toLowerCase())).limit(1);if(!admin||!await bcrypt.compare(b.password,admin.passwordHash)){attempts.set(ip,{n:(a?.n||0)+1,at:a?.at||now});return NextResponse.json({error:'Email or password is incorrect.'},{status:401});}attempts.delete(ip);const s=await getSession();s.adminId=admin.id;await s.save();return NextResponse.json({ok:true});}catch{return NextResponse.json({error:'Please check your details and try again.'},{status:400});}}
+import { jsonError, jsonOk } from '@/lib/http';
+import { clearRateLimit, clientKey, hitRateLimit, isRateLimited } from '@/lib/rate-limit';
+
+const loginSchema = z.object({
+  email: z.email(),
+  password: z.string().min(1).max(128),
+});
+
+export async function POST(request: Request) {
+  const key = clientKey(request, 'login');
+  if (isRateLimited(key, 8, 15 * 60_000)) {
+    return jsonError('Too many attempts. Try again in 15 minutes.', 429);
+  }
+
+  try {
+    const body = loginSchema.parse(await request.json());
+    if (!db) return jsonError('Database is not configured.', 503);
+
+    const [admin] = await db.select().from(admins).where(eq(admins.email, body.email.toLowerCase())).limit(1);
+    if (!admin || !(await bcrypt.compare(body.password, admin.passwordHash))) {
+      hitRateLimit(key, 15 * 60_000);
+      return jsonError('Email or password is incorrect.', 401);
+    }
+    clearRateLimit(key);
+
+    const session = await getSession();
+    session.adminId = admin.id;
+    await session.save();
+    return jsonOk({ ok: true });
+  } catch {
+    return jsonError('Please check your details and try again.', 400);
+  }
+}

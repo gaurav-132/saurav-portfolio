@@ -1,12 +1,72 @@
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
 import { desc, eq } from 'drizzle-orm';
-import { db } from '@/lib/db';
-import { projects } from '@/lib/schema';
-import { requireAdmin } from '@/lib/auth';
+import { projects } from '@/db/schema';
+import { adminContext } from '@/lib/admin-guard';
+import { jsonError, jsonOk } from '@/lib/http';
 import { slugify } from '@/lib/slug';
-const schema=z.object({title:z.string().min(1).max(160),slug:z.string().max(180).optional(),description:z.string().max(5000).optional(),categoryId:z.string().uuid().nullable().optional(),thumbnail:z.string().url().or(z.string().regex(/^\/demo\/[a-z0-9-]+\.svg$/)).or(z.literal('')).optional(),videoUrl:z.string().url().or(z.literal('')).optional(),featured:z.boolean().optional(),published:z.boolean().optional(),sortOrder:z.number().int().optional()});
-export async function GET(){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});if(!db)return NextResponse.json([]);return NextResponse.json(await db.select().from(projects).orderBy(desc(projects.updatedAt)));}
-export async function POST(req:Request){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});try{const v=schema.parse(await req.json());if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});const [item]=await db.insert(projects).values({...v,slug:slugify(v.slug||v.title),description:v.description||''}).returning();return NextResponse.json(item,{status:201});}catch{return NextResponse.json({error:'Invalid project or slug already exists.'},{status:400});}}
-export async function PATCH(req:Request){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});try{const {id,...input}=await req.json();const v=schema.partial().parse(input);if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});const [item]=await db.update(projects).set({...v,...(v.slug||v.title?{slug:slugify(v.slug||v.title!)}:{}),updatedAt:new Date()}).where(eq(projects.id,id)).returning();return item?NextResponse.json(item):NextResponse.json({error:'Project not found.'},{status:404});}catch{return NextResponse.json({error:'Invalid project details.'},{status:400});}}
-export async function DELETE(req:Request){if(!await requireAdmin())return NextResponse.json({error:'Unauthorized'},{status:401});try{const {id}=await req.json();if(!db)return NextResponse.json({error:'Database is not configured.'},{status:503});await db.delete(projects).where(eq(projects.id,id));return NextResponse.json({ok:true});}catch{return NextResponse.json({error:'Could not delete project.'},{status:400});}}
+import { idBody, projectInput } from '@/lib/validation';
+import { mapProject } from '@/domain/mappers';
+
+export async function GET() {
+  const context = await adminContext();
+  if (!context.ok) return context.response;
+  const rows = await context.db.select().from(projects).orderBy(desc(projects.updatedAt));
+  return jsonOk(rows.map((row) => mapProject(row as unknown as Record<string, unknown>)));
+}
+
+export async function POST(request: Request) {
+  const context = await adminContext();
+  if (!context.ok) return context.response;
+  try {
+    const input = projectInput.parse(await request.json());
+    const [item] = await context.db
+      .insert(projects)
+      .values({
+        ...input,
+        slug: slugify(input.slug || input.title),
+        description: input.description || '',
+        clientName: input.clientName || '',
+        year: input.year || '',
+        duration: input.duration || '',
+        role: input.role || 'Editor',
+      })
+      .returning();
+    return jsonOk(mapProject(item as unknown as Record<string, unknown>), 201);
+  } catch {
+    return jsonError('Invalid project or slug already exists.', 400);
+  }
+}
+
+export async function PATCH(request: Request) {
+  const context = await adminContext();
+  if (!context.ok) return context.response;
+  try {
+    const { id, ...input } = await request.json();
+    const parsed = projectInput.partial().parse(input);
+    const [item] = await context.db
+      .update(projects)
+      .set({
+        ...parsed,
+        ...(parsed.slug || parsed.title ? { slug: slugify(parsed.slug || parsed.title!) } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(projects.id, id))
+      .returning();
+    return item
+      ? jsonOk(mapProject(item as unknown as Record<string, unknown>))
+      : jsonError('Project not found.', 404);
+  } catch {
+    return jsonError('Invalid project details.', 400);
+  }
+}
+
+export async function DELETE(request: Request) {
+  const context = await adminContext();
+  if (!context.ok) return context.response;
+  try {
+    const { id } = idBody.parse(await request.json());
+    await context.db.delete(projects).where(eq(projects.id, id));
+    return jsonOk({ ok: true });
+  } catch {
+    return jsonError('Could not delete project.', 400);
+  }
+}
