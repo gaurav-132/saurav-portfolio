@@ -14,6 +14,7 @@ import {
 import type { AdminWorkspace, Category, Inquiry, LeadStatus, Offering, Project, SiteProfile, Testimonial } from '@/domain/types';
 import { leadStatuses } from '@/domain/types';
 import AuthScreen from './AuthScreen';
+import AdminLoading from './AdminLoading';
 import DataTable, { type Column } from './DataTable';
 import Dialog from './Dialog';
 
@@ -239,7 +240,7 @@ export default function AdminApp() {
     }
   }
 
-  if (loading) return <div className="admin-page"><p>Loading workspace…</p></div>;
+  if (loading) return <AdminLoading />;
   if (!logged && !preview) {
     return <AuthScreen setup={setup} error={error} onSubmit={handleLogin} onToggleSetup={toggleSetup} onPreview={() => setPreview(true)} />;
   }
