@@ -37,6 +37,8 @@ export const projects = pgTable(
     categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
     thumbnail: text('thumbnail').default('').notNull(),
     videoUrl: text('video_url').default('').notNull(),
+    actualVideoUrl: text('actual_video_url').default('').notNull(),
+    playbackSource: text('playback_source').default('uploaded').notNull(),
     clientName: text('client_name').default('').notNull(),
     year: text('year').default('').notNull(),
     duration: text('duration').default('').notNull(),
@@ -103,6 +105,14 @@ export const offerings = pgTable(
 export const settings = pgTable('settings', {
   key: text('key').primaryKey(),
   value: text('value').notNull(),
+});
+
+export const mediaAssets = pgTable('media_assets', {
+  objectKey: text('object_key').primaryKey(),
+  originalFileName: text('original_file_name').notNull(),
+  contentType: text('content_type').notNull(),
+  fileSize: integer('file_size').notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
 export const categoryRelations = relations(categories, ({ many }) => ({

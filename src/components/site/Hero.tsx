@@ -11,7 +11,7 @@ export default function Hero({ profile, featured }: { profile: SiteProfile; feat
     <section id="home" className="hero wrap">
       <div>
         <div className="hero-kicker">
-          <span className="eyebrow">{profile.heroEyebrow}</span>
+          <span className="eyebrow" >{profile.heroEyebrow}</span>
           <span className="eyebrow hero-name">· {profile.displayName}</span>
         </div>
         <h1>

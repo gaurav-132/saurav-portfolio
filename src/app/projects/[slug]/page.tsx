@@ -3,6 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { mediaFromUrl } from '@/lib/media';
 import { getPublishedProject } from '@/services/portfolio';
+import ProjectPlayer from '@/components/site/ProjectPlayer';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,11 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
   if (!result) notFound();
 
   const { project, categoryName } = result;
-  const playable = mediaFromUrl(project.videoUrl);
+  const sourceUrl = project.playbackSource === 'external' ? project.actualVideoUrl : project.videoUrl;
+  const playable = mediaFromUrl(sourceUrl);
+  const fallbackUrl = project.playbackSource === 'external'
+    ? project.actualVideoUrl || undefined
+    : playable.kind === 'embed' ? playable.fallbackUrl : undefined;
 
   return (
     <main className="project-page wrap">
@@ -27,10 +32,8 @@ export default async function ProjectPage({ params }: { params: Promise<{ slug: 
           {project.duration && <span>Duration · {project.duration}</span>}
           {project.role && <span>Role · {project.role}</span>}
         </div>
-        {playable.kind === 'video' ? (
-          <video className="project-media" controls playsInline preload="metadata" poster={project.thumbnail || undefined} src={playable.src} />
-        ) : playable.kind === 'embed' ? (
-          <iframe className="project-media embed" title={`${project.title} video`} src={playable.src} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowFullScreen />
+        {playable.kind !== 'none' || (project.playbackSource === 'external' && Boolean(project.actualVideoUrl)) ? (
+          <ProjectPlayer title={project.title} playable={playable} poster={project.thumbnail || undefined} fallbackUrl={fallbackUrl} />
         ) : project.thumbnail ? (
           <Image className="project-media" src={project.thumbnail} unoptimized width={1920} height={1080} alt={`${project.title} project cover`} />
         ) : (

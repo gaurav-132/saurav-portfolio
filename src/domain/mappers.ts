@@ -32,6 +32,8 @@ export function mapProject(row: Record<string, unknown>): Project {
     categoryId: row.categoryId == null ? null : text(row.categoryId),
     thumbnail: text(row.thumbnail),
     videoUrl: text(row.videoUrl),
+    actualVideoUrl: text(row.actualVideoUrl),
+    playbackSource: row.playbackSource === 'external' || (!('playbackSource' in row) && Boolean(row.actualVideoUrl)) ? 'external' : 'uploaded',
     clientName: text(row.clientName),
     year: text(row.year),
     duration: text(row.duration),

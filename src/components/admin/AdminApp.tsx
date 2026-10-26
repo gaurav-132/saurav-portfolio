@@ -13,19 +13,35 @@ import {
 } from '@/domain/content';
 import type { AdminWorkspace, Category, Inquiry, LeadStatus, Offering, Project, SiteProfile, Testimonial } from '@/domain/types';
 import { leadStatuses } from '@/domain/types';
+import {
+  categoryInput,
+  inquiryUpdate,
+  offeringInput,
+  profileInput,
+  projectInput,
+  projectPlaybackInput,
+  testimonialInput,
+} from '@/lib/validation';
 import AuthScreen from './AuthScreen';
 import AdminLoading from './AdminLoading';
 import DataTable, { type Column } from './DataTable';
 import Dialog from './Dialog';
+import ProjectForm from './ProjectForm';
+import type { ProjectFormState } from './ProjectForm';
+import { CategoryForm, LeadForm, OfferingForm, SettingsForm, TestimonialForm } from './EntityForms';
+import DeleteConfirmDialog from './DeleteConfirmDialog';
 
 type Section = 'overview' | 'works' | 'categories' | 'leads' | 'testimonials' | 'services' | 'settings';
 type DialogKind = 'project' | 'category' | 'lead' | 'testimonial' | 'offering' | null;
+type DeleteRequest = { endpoint: string; id: string; label: string };
 
-const emptyProject = {
+const emptyProject: ProjectFormState = {
   title: '',
   description: '',
   thumbnail: '',
   videoUrl: '',
+  actualVideoUrl: '',
+  playbackSource: 'uploaded' as 'uploaded' | 'external',
   categoryId: null as string | null,
   clientName: '',
   year: '',
@@ -34,6 +50,30 @@ const emptyProject = {
   published: false,
   featured: false,
 };
+
+function uploadViewHref(value: string) {
+  try {
+    const parsed = new URL(value, 'https://portfolio.invalid');
+    if (parsed.pathname === '/api/media') {
+      const objectKey = parsed.searchParams.get('key');
+      if (objectKey) return `/api/admin/upload?objectKey=${encodeURIComponent(objectKey)}`;
+    }
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return value;
+    if (value.startsWith('/') && !value.startsWith('//')) return value;
+  } catch {
+    return '#';
+  }
+  return '#';
+}
+
+function uploadedObjectKey(value: string) {
+  try {
+    const parsed = new URL(value, 'https://portfolio.invalid');
+    return parsed.pathname === '/api/media' ? parsed.searchParams.get('key') : null;
+  } catch {
+    return null;
+  }
+}
 
 const sections: { id: Section; title: string }[] = [
   { id: 'overview', title: 'Overview' },
@@ -63,8 +103,15 @@ export default function AdminApp() {
   const [setup, setSetup] = useState(false);
   const [section, setSection] = useState<Section>('overview');
   const [dialog, setDialog] = useState<DialogKind>(null);
+  const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [editingId, setEditingId] = useState('');
-  const [uploading, setUploading] = useState(false);
+  const [uploadingField, setUploadingField] = useState<'thumbnail' | 'videoUrl' | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savingSettings, setSavingSettings] = useState(false);
+  const [notice, setNotice] = useState('');
+  const [pendingUploadKeys, setPendingUploadKeys] = useState<string[]>([]);
   const [leadFilter, setLeadFilter] = useState<'all' | LeadStatus>('all');
   const [workspace, setWorkspace] = useState<AdminWorkspace>({
     projects: [],
@@ -119,6 +166,12 @@ export default function AdminApp() {
     return () => window.clearTimeout(timer);
   }, []);
 
+  useEffect(() => {
+    if (!notice) return;
+    const timer = window.setTimeout(() => setNotice(''), 4000);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
   async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const values = new FormData(event.currentTarget);
@@ -156,6 +209,8 @@ export default function AdminApp() {
         description: project.description,
         thumbnail: project.thumbnail,
         videoUrl: project.videoUrl,
+        actualVideoUrl: project.actualVideoUrl,
+        playbackSource: project.playbackSource,
         categoryId: project.categoryId,
         clientName: project.clientName,
         year: project.year,
@@ -181,62 +236,155 @@ export default function AdminApp() {
     setDialog(kind);
   }
 
-  async function save(event: FormEvent<HTMLFormElement>, endpoint: string, method: string, body: unknown) {
-    event.preventDefault();
-    if (preview) return;
-    try {
-      setError('');
-      await requestJson(endpoint, method, body);
-      setDialog(null);
-      await refresh();
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not save.');
+  function closeDialog() {
+    const unusedKeys = pendingUploadKeys;
+    setPendingUploadKeys([]);
+    setDialog(null);
+    for (const objectKey of unusedKeys) {
+      void requestJson('/api/admin/upload', 'DELETE', { objectKey }).catch(() => undefined);
     }
   }
 
-  async function removeItem(endpoint: string, id: string, label: string) {
-    if (preview || !window.confirm(`Delete ${label}? This cannot be undone.`)) return;
+  async function save(event: FormEvent<HTMLFormElement>, endpoint: string, method: string, body: unknown) {
+    event.preventDefault();
+    if (preview || saving || uploadingField) return;
+    const validators = {
+      '/api/admin/projects': (value: unknown) => {
+        const parsed = projectInput.safeParse(value);
+        if (!parsed.success) return parsed;
+        const playback = projectPlaybackInput.safeParse(parsed.data);
+        return playback.success ? parsed : playback;
+      },
+      '/api/admin/categories': (value: unknown) => categoryInput.safeParse(value),
+      '/api/admin/queries': (value: unknown) => inquiryUpdate.safeParse(value),
+      '/api/admin/testimonials': (value: unknown) => testimonialInput.safeParse(value),
+      '/api/admin/offerings': (value: unknown) => offeringInput.safeParse(value),
+    } as const;
+    const validate = validators[endpoint as keyof typeof validators];
+    if (validate) {
+      const result = validate(body);
+      if (!result.success) {
+        setError(result.error.issues[0]?.message || 'Check the required fields and try again.');
+        return;
+      }
+    }
+    setSaving(true);
     try {
-      await requestJson(endpoint, 'DELETE', { id });
+      setError('');
+      setNotice('');
+      await requestJson(endpoint, method, body);
+      if (endpoint === '/api/admin/projects') {
+        const retainedKeys = new Set([projectForm.thumbnail, projectForm.videoUrl].map(uploadedObjectKey).filter(Boolean));
+        const removedKeys = pendingUploadKeys.filter((key) => !retainedKeys.has(key));
+        await Promise.all(removedKeys.map((objectKey) => requestJson('/api/admin/upload', 'DELETE', { objectKey }).catch(() => undefined)));
+        setPendingUploadKeys([]);
+      }
       await refresh();
+      setDialog(null);
+      setNotice('Changes saved successfully.');
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : 'Could not delete item.');
+      setError(reason instanceof Error ? reason.message : 'Could not save.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function removeItem(endpoint: string, id: string, label: string) {
+    if (preview || deleting || refreshing) return;
+    setDeleteRequest({ endpoint, id, label });
+  }
+
+  async function confirmDelete() {
+    if (!deleteRequest || deleting || refreshing) return;
+    const target = deleteRequest;
+    setDeleting(true);
+    setError('');
+    try {
+      await requestJson(target.endpoint, 'DELETE', { id: target.id });
+      setDeleteRequest(null);
+      setRefreshing(true);
+      await refresh();
+      setNotice('Entry deleted successfully.');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not delete or refresh the entry.');
+    } finally {
+      setDeleting(false);
+      setRefreshing(false);
     }
   }
 
   async function uploadFile(file: File, field: 'thumbnail' | 'videoUrl') {
     if (preview) return;
-    setUploading(true);
+    setUploadingField(field);
     setError('');
+    let objectKey = '';
     try {
-      const signed = await requestJson<{ url: string; publicUrl: string }>('/api/admin/upload', 'POST', {
+      const signed = await requestJson<{ url: string; objectKey: string; mediaUrl: string }>('/api/admin/upload', 'POST', {
+        action: 'prepare',
         fileName: file.name,
         contentType: file.type,
         size: file.size,
       });
+      objectKey = signed.objectKey;
       const response = await fetch(signed.url, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
-      if (!response.ok) throw new Error('Upload failed. Check your storage settings.');
-      setProjectForm((form) => ({ ...form, [field]: signed.publicUrl }));
+      if (!response.ok) {
+        const details = await response.text().catch(() => '');
+        throw new Error(`Neon Object Storage rejected the upload (${response.status}). ${details.slice(0, 240)}`);
+      }
+      const completed = await requestJson<{ mediaUrl: string }>('/api/admin/upload', 'POST', {
+        action: 'complete',
+        objectKey: signed.objectKey,
+        fileName: file.name,
+        contentType: file.type,
+        size: file.size,
+      });
+      setPendingUploadKeys((keys) => [...keys, signed.objectKey]);
+      setProjectForm((form) => ({ ...form, [field]: completed.mediaUrl }));
     } catch (reason) {
+      if (objectKey) void requestJson('/api/admin/upload', 'DELETE', { objectKey }).catch(() => undefined);
       setError(reason instanceof Error ? reason.message : 'Upload failed.');
     } finally {
-      setUploading(false);
+      setUploadingField(null);
+    }
+  }
+
+  async function removeUploadedFile(field: 'thumbnail' | 'videoUrl') {
+    const objectKey = uploadedObjectKey(projectForm[field]);
+    setProjectForm((form) => ({ ...form, [field]: '' }));
+    if (!objectKey || !pendingUploadKeys.includes(objectKey)) return;
+
+    try {
+      await requestJson('/api/admin/upload', 'DELETE', { objectKey });
+      setPendingUploadKeys((keys) => keys.filter((key) => key !== objectKey));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : 'Could not remove the uploaded file.');
     }
   }
 
   async function saveSettings(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (preview) return;
+    if (preview || savingSettings) return;
+    const payload = {
+      ...profileForm,
+      aboutParagraphs: profileForm.aboutParagraphs.filter(Boolean),
+      tools: profileForm.tools.map((item) => item.trim()).filter(Boolean),
+    };
+    const validation = profileInput.safeParse(payload);
+    if (!validation.success) {
+      setError(validation.error.issues[0]?.message || 'Check the required settings and try again.');
+      return;
+    }
+    setSavingSettings(true);
     try {
       setError('');
-      const profile = await requestJson<SiteProfile>('/api/admin/settings', 'PATCH', {
-        ...profileForm,
-        aboutParagraphs: profileForm.aboutParagraphs.filter(Boolean),
-        tools: profileForm.tools.map((item) => item.trim()).filter(Boolean),
-      });
+      setNotice('');
+      const profile = await requestJson<SiteProfile>('/api/admin/settings', 'PATCH', validation.data);
       setProfileForm(profile);
+      setNotice('Changes saved successfully.');
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not save settings.');
+    } finally {
+      setSavingSettings(false);
     }
   }
 
@@ -309,7 +457,9 @@ export default function AdminApp() {
           </div>
         </aside>
         <main className="admin-content">
+          {notice && !dialog && <div className="success" role="status">{notice}</div>}
           {error && !dialog && <div className="error">{error}</div>}
+          {refreshing && <div className="admin-refresh-overlay" role="status" aria-live="polite"><span className="admin-spinner" aria-hidden="true" /><span>Refreshing workspace…</span></div>}
           <div className="admin-title">
             <div>
               <div className="eyebrow">{eyebrow}</div>
@@ -403,127 +553,37 @@ export default function AdminApp() {
             />
           )}
 
-          {section === 'settings' && (
-            <form className="glass admin-box settings-form" onSubmit={saveSettings}>
-              <div className="dialog-grid">
-                <label className="field">Display name<input value={profileForm.displayName} onChange={(event) => setProfileForm({ ...profileForm, displayName: event.target.value })} /></label>
-                <label className="field">Role title<input value={profileForm.roleTitle} onChange={(event) => setProfileForm({ ...profileForm, roleTitle: event.target.value })} /></label>
-                <label className="field">Location<input value={profileForm.location} onChange={(event) => setProfileForm({ ...profileForm, location: event.target.value })} /></label>
-                <label className="field">Public email<input value={profileForm.email} onChange={(event) => setProfileForm({ ...profileForm, email: event.target.value })} /></label>
-              </div>
-              <label className="field">Hero headline<input value={profileForm.heroHeadline} onChange={(event) => setProfileForm({ ...profileForm, heroHeadline: event.target.value })} /></label>
-              <label className="field">Hero highlight<input value={profileForm.heroHighlight} onChange={(event) => setProfileForm({ ...profileForm, heroHighlight: event.target.value })} /></label>
-              <label className="field">Hero copy<textarea value={profileForm.heroCopy} onChange={(event) => setProfileForm({ ...profileForm, heroCopy: event.target.value })} /></label>
-              <label className="field">About title<input value={profileForm.aboutTitle} onChange={(event) => setProfileForm({ ...profileForm, aboutTitle: event.target.value })} /></label>
-              <label className="field">About copy<textarea value={profileForm.aboutParagraphs.join('\n\n')} onChange={(event) => setProfileForm({ ...profileForm, aboutParagraphs: event.target.value.split(/\n\n+/) })} /></label>
-              <label className="field">Tools (comma separated)<input value={profileForm.tools.join(', ')} onChange={(event) => setProfileForm({ ...profileForm, tools: event.target.value.split(',').map((item) => item.trim()) })} /></label>
-              <label className="field">Contact title<input value={profileForm.contactTitle} onChange={(event) => setProfileForm({ ...profileForm, contactTitle: event.target.value })} /></label>
-              <div className="dialog-actions">
-                <button className="pill primary" disabled={preview}>{preview ? 'Preview only' : 'Save settings'}</button>
-              </div>
-            </form>
-          )}
+          {section === 'settings' && <SettingsForm value={profileForm} onChange={setProfileForm} onSubmit={saveSettings} preview={preview} saving={savingSettings} />}
         </main>
       </div>
 
       {dialog && (
-        <Dialog title={`${editingId ? 'Edit' : 'Add'} ${dialog}`} onClose={() => setDialog(null)}>
+        <Dialog title={`${editingId ? 'Edit' : 'Add'} ${dialog}`} onClose={closeDialog}>
           {dialog === 'project' && (
-            <form className="dialog-form" onSubmit={(event) => save(event, '/api/admin/projects', editingId ? 'PATCH' : 'POST', editingId ? { ...projectForm, id: editingId } : projectForm)}>
-              <label>Project name<input required maxLength={160} value={projectForm.title} onChange={(event) => setProjectForm({ ...projectForm, title: event.target.value })} /></label>
-              <label>Description<textarea maxLength={5000} rows={4} value={projectForm.description} onChange={(event) => setProjectForm({ ...projectForm, description: event.target.value })} /></label>
-              <div className="dialog-grid">
-                <label>Category
-                  <select value={projectForm.categoryId || ''} onChange={(event) => setProjectForm({ ...projectForm, categoryId: event.target.value || null })}>
-                    <option value="">Uncategorized</option>
-                    {data.categories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}
-                  </select>
-                </label>
-                <label>Client<input value={projectForm.clientName} onChange={(event) => setProjectForm({ ...projectForm, clientName: event.target.value })} /></label>
-                <label>Year<input value={projectForm.year} onChange={(event) => setProjectForm({ ...projectForm, year: event.target.value })} /></label>
-                <label>Duration<input value={projectForm.duration} onChange={(event) => setProjectForm({ ...projectForm, duration: event.target.value })} /></label>
-              </div>
-              <label>Role<input value={projectForm.role} onChange={(event) => setProjectForm({ ...projectForm, role: event.target.value })} /></label>
-              <label>Thumbnail image<input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0], 'thumbnail')} /></label>
-              <label>Thumbnail URL<input type="url" value={projectForm.thumbnail} onChange={(event) => setProjectForm({ ...projectForm, thumbnail: event.target.value })} /></label>
-              <label>Video file<input type="file" accept="video/mp4,video/webm" onChange={(event) => event.target.files?.[0] && uploadFile(event.target.files[0], 'videoUrl')} /></label>
-              <label>Video URL<input type="url" value={projectForm.videoUrl} onChange={(event) => setProjectForm({ ...projectForm, videoUrl: event.target.value })} /></label>
-              <div className="dialog-checks">
-                <label><input type="checkbox" checked={projectForm.published} onChange={(event) => setProjectForm({ ...projectForm, published: event.target.checked })} />Publish work</label>
-                <label><input type="checkbox" checked={projectForm.featured} onChange={(event) => setProjectForm({ ...projectForm, featured: event.target.checked })} />Feature on homepage</label>
-              </div>
-              {error && <div className="error">{error}</div>}
-              <div className="dialog-actions">
-                <button type="button" className="pill" onClick={() => setDialog(null)}>Cancel</button>
-                <button className="pill primary" disabled={preview || uploading}>{preview ? 'Preview only' : uploading ? 'Uploading…' : editingId ? 'Save changes' : 'Create work'}</button>
-              </div>
-            </form>
+            <ProjectForm
+              value={projectForm}
+              categories={data.categories}
+              editing={Boolean(editingId)}
+              preview={preview}
+              saving={saving}
+              uploadingField={uploadingField}
+              error={error}
+              currentYear={new Date().getFullYear()}
+              onChange={setProjectForm}
+              onUpload={uploadFile}
+              onRemove={removeUploadedFile}
+              onCancel={closeDialog}
+              uploadViewHref={uploadViewHref}
+              onSubmit={(event) => save(event, '/api/admin/projects', editingId ? 'PATCH' : 'POST', editingId ? { ...projectForm, id: editingId } : projectForm)}
+            />
           )}
-          {dialog === 'category' && (
-            <form className="dialog-form" onSubmit={(event) => save(event, '/api/admin/categories', editingId ? 'PATCH' : 'POST', editingId ? { ...categoryForm, id: editingId } : categoryForm)}>
-              <label>Category name<input required maxLength={80} value={categoryForm.name} onChange={(event) => setCategoryForm({ name: event.target.value })} /></label>
-              <p className="form-hint">A clean URL slug is created from the name automatically.</p>
-              {error && <div className="error">{error}</div>}
-              <div className="dialog-actions">
-                <button type="button" className="pill" onClick={() => setDialog(null)}>Cancel</button>
-                <button className="pill primary" disabled={preview}>{preview ? 'Preview only' : 'Save category'}</button>
-              </div>
-            </form>
-          )}
-          {dialog === 'lead' && (
-            <form className="dialog-form" onSubmit={(event) => save(event, '/api/admin/queries', 'PATCH', { ...leadForm, id: editingId })}>
-              <div className="dialog-grid">
-                <label>Name<input required value={leadForm.name} onChange={(event) => setLeadForm({ ...leadForm, name: event.target.value })} /></label>
-                <label>Email<input required type="email" value={leadForm.email} onChange={(event) => setLeadForm({ ...leadForm, email: event.target.value })} /></label>
-              </div>
-              <label>Mobile<input required value={leadForm.phone} onChange={(event) => setLeadForm({ ...leadForm, phone: event.target.value })} /></label>
-              <label>Stage
-                <select value={leadForm.status} onChange={(event) => setLeadForm({ ...leadForm, status: event.target.value as LeadStatus })}>
-                  {leadStatuses.map((status) => <option key={status} value={status}>{leadStatusCopy[status]}</option>)}
-                </select>
-              </label>
-              <label>Query<textarea required rows={5} value={leadForm.message} onChange={(event) => setLeadForm({ ...leadForm, message: event.target.value })} /></label>
-              <label>Internal notes<textarea rows={3} value={leadForm.notes} onChange={(event) => setLeadForm({ ...leadForm, notes: event.target.value })} /></label>
-              {error && <div className="error">{error}</div>}
-              <div className="dialog-actions">
-                <button type="button" className="pill" onClick={() => setDialog(null)}>Cancel</button>
-                <button className="pill primary" disabled={preview}>{preview ? 'Preview only' : 'Save lead'}</button>
-              </div>
-            </form>
-          )}
-          {dialog === 'testimonial' && (
-            <form className="dialog-form" onSubmit={(event) => save(event, '/api/admin/testimonials', editingId ? 'PATCH' : 'POST', editingId ? { ...quoteForm, id: editingId } : quoteForm)}>
-              <label>Quote<textarea required minLength={8} value={quoteForm.quote} onChange={(event) => setQuoteForm({ ...quoteForm, quote: event.target.value })} /></label>
-              <div className="dialog-grid">
-                <label>Author<input required value={quoteForm.author} onChange={(event) => setQuoteForm({ ...quoteForm, author: event.target.value })} /></label>
-                <label>Role<input value={quoteForm.role} onChange={(event) => setQuoteForm({ ...quoteForm, role: event.target.value })} /></label>
-              </div>
-              <div className="dialog-checks">
-                <label><input type="checkbox" checked={quoteForm.published} onChange={(event) => setQuoteForm({ ...quoteForm, published: event.target.checked })} />Publish</label>
-              </div>
-              {error && <div className="error">{error}</div>}
-              <div className="dialog-actions">
-                <button type="button" className="pill" onClick={() => setDialog(null)}>Cancel</button>
-                <button className="pill primary" disabled={preview}>{preview ? 'Preview only' : 'Save quote'}</button>
-              </div>
-            </form>
-          )}
-          {dialog === 'offering' && (
-            <form className="dialog-form" onSubmit={(event) => save(event, '/api/admin/offerings', editingId ? 'PATCH' : 'POST', editingId ? { ...offeringForm, id: editingId } : offeringForm)}>
-              <label>Title<input required value={offeringForm.title} onChange={(event) => setOfferingForm({ ...offeringForm, title: event.target.value })} /></label>
-              <label>Description<textarea value={offeringForm.description} onChange={(event) => setOfferingForm({ ...offeringForm, description: event.target.value })} /></label>
-              <div className="dialog-checks">
-                <label><input type="checkbox" checked={offeringForm.published} onChange={(event) => setOfferingForm({ ...offeringForm, published: event.target.checked })} />Publish</label>
-              </div>
-              {error && <div className="error">{error}</div>}
-              <div className="dialog-actions">
-                <button type="button" className="pill" onClick={() => setDialog(null)}>Cancel</button>
-                <button className="pill primary" disabled={preview}>{preview ? 'Preview only' : 'Save service'}</button>
-              </div>
-            </form>
-          )}
+          {dialog === 'category' && <CategoryForm value={categoryForm} onChange={setCategoryForm} error={error} preview={preview} onCancel={() => setDialog(null)} onSubmit={(event) => save(event, '/api/admin/categories', editingId ? 'PATCH' : 'POST', editingId ? { ...categoryForm, id: editingId } : categoryForm)} />}
+          {dialog === 'lead' && <LeadForm value={leadForm} onChange={setLeadForm} error={error} preview={preview} onCancel={() => setDialog(null)} onSubmit={(event) => save(event, '/api/admin/queries', 'PATCH', { ...leadForm, id: editingId })} />}
+          {dialog === 'testimonial' && <TestimonialForm value={quoteForm} onChange={setQuoteForm} error={error} preview={preview} onCancel={() => setDialog(null)} onSubmit={(event) => save(event, '/api/admin/testimonials', editingId ? 'PATCH' : 'POST', editingId ? { ...quoteForm, id: editingId } : quoteForm)} />}
+          {dialog === 'offering' && <OfferingForm value={offeringForm} onChange={setOfferingForm} error={error} preview={preview} onCancel={() => setDialog(null)} onSubmit={(event) => save(event, '/api/admin/offerings', editingId ? 'PATCH' : 'POST', editingId ? { ...offeringForm, id: editingId } : offeringForm)} />}
         </Dialog>
       )}
+      {deleteRequest && <DeleteConfirmDialog label={deleteRequest.label} deleting={deleting} onCancel={() => { if (!deleting) setDeleteRequest(null); }} onConfirm={confirmDelete} />}
     </div>
   );
 }

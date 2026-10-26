@@ -1,12 +1,25 @@
 export type PlayableMedia =
-  | { kind: 'embed'; src: string }
+  | { kind: 'embed'; src: string; fallbackUrl?: string }
   | { kind: 'video'; src: string }
   | { kind: 'none' };
 
 export function mediaFromUrl(url: string): PlayableMedia {
   try {
+    if (url.startsWith('/api/media?key=portfolio%2F')) return { kind: 'video', src: url };
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return { kind: 'none' };
+
+    if (parsed.hostname === 'drive.google.com') {
+      const fileId = parsed.pathname.match(/^\/file\/d\/([^/]+)/)?.[1] ?? parsed.searchParams.get('id');
+      if (fileId && /^[\w-]{8,200}$/.test(fileId)) {
+        return {
+          kind: 'embed',
+          src: `https://drive.google.com/file/d/${encodeURIComponent(fileId)}/preview`,
+          fallbackUrl: parsed.toString(),
+        };
+      }
+      return { kind: 'none' };
+    }
 
     if (parsed.hostname === 'youtu.be' || parsed.hostname === 'youtube.com' || parsed.hostname.endsWith('.youtube.com')) {
       const id =

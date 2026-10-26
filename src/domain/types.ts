@@ -16,6 +16,8 @@ export type Project = {
   categoryId: string | null;
   thumbnail: string;
   videoUrl: string;
+  actualVideoUrl: string;
+  playbackSource: 'uploaded' | 'external';
   clientName: string;
   year: string;
   duration: string;

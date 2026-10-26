@@ -21,6 +21,7 @@ SELECT
   1
 FROM categories
 WHERE slug = 'cinematic-edits'
+  AND NOT EXISTS (SELECT 1 FROM projects WHERE title = 'A Quiet Morning')
 ON CONFLICT (slug) DO NOTHING;
 
 INSERT INTO projects (title, slug, description, category_id, thumbnail, video_url, featured, published, sort_order)
@@ -36,6 +37,7 @@ SELECT
   2
 FROM categories
 WHERE slug = 'reels-shorts'
+  AND NOT EXISTS (SELECT 1 FROM projects WHERE title = 'Small Moments')
 ON CONFLICT (slug) DO NOTHING;
 
 INSERT INTO projects (title, slug, description, category_id, thumbnail, video_url, featured, published, sort_order)
@@ -51,4 +53,5 @@ SELECT
   3
 FROM categories
 WHERE slug = 'documentaries'
+  AND NOT EXISTS (SELECT 1 FROM projects WHERE title = 'Light in Bloom')
 ON CONFLICT (slug) DO NOTHING;
