@@ -22,8 +22,8 @@ Set `DATABASE_URL`, a random `SESSION_SECRET` of at least 32 characters, and `AD
 - `DATABASE_URL` — PostgreSQL connection string (required for project management)
 - `SESSION_SECRET` — secret for encrypted, HttpOnly admin sessions (required in production)
 - `ADMIN_SETUP_TOKEN` — one-time secret for initial admin provisioning
-- `AWS_ENDPOINT_URL_S3`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` — Neon Object Storage credentials; keep these server-side and configure them locally and in Netlify.
-- `AWS_S3_BUCKET` — bucket name; defaults to `uploads`.
+- `SP_AWS_ENDPOINT_URL_S3`, `SP_AWS_ACCESS_KEY_ID`, `SP_AWS_SECRET_ACCESS_KEY`, `SP_AWS_REGION` — Neon Object Storage credentials; keep these server-side and configure them locally and in Netlify.
+- `R2_BUCKET_NAME` — object storage bucket name; defaults to `uploads`.
 
 The upload endpoint supports JPEG/PNG/WebP images up to 8 MB and MP4/WebM videos up to 250 MB. The browser receives a short-lived signed upload URL; the storage credentials never enter the browser. Keep the Neon bucket private: the app issues short-lived signed reads only for assets referenced by published projects.
 
@@ -37,7 +37,7 @@ Netlify supports this Next.js app and can deploy it from the GitHub repository. 
 
 The admin panel needs a persistent PostgreSQL database. Create a free database with a provider such as Neon, then set `DATABASE_URL` in Vercel. Before first use, run `npm run db:migrate` once against that production database. Set `SESSION_SECRET` to a random secret of 32 or more characters and `ADMIN_SETUP_TOKEN` to a separate one-time value in Vercel's project environment settings. Visit `/admin`, select initial setup, create the admin, then remove `ADMIN_SETUP_TOKEN` from Vercel and redeploy. Never commit `.env.local` or real secrets.
 
-For directly hosted video files, Neon Object Storage is used for object bytes and Neon PostgreSQL stores project content plus uploaded file metadata. In Netlify, add the four `AWS_*` storage variables and `AWS_S3_BUCKET=uploads` under Site configuration → Environment variables. Add the same values to `.env.local` for local development. Do not commit storage credentials. Run `npm run db:migrate` against the same Neon database to add the media metadata table. Neon Object Storage buckets are private by default; this app signs reads on the server for published media, so no public bucket access change is needed. If you prefer a simpler video workflow and accept YouTube branding, use YouTube share/embed links instead.
+For directly hosted video files, Neon Object Storage is used for object bytes and Neon PostgreSQL stores project content plus uploaded file metadata. In Netlify, add `SP_AWS_ENDPOINT_URL_S3`, `SP_AWS_ACCESS_KEY_ID`, `SP_AWS_SECRET_ACCESS_KEY`, `SP_AWS_REGION`, and `R2_BUCKET_NAME` under Site configuration → Environment variables. Add the same values to `.env.local` for local development. Do not commit storage credentials. Run `npm run db:migrate` against the same Neon database to add the media metadata table. Neon Object Storage buckets are private by default; this app signs reads on the server for published media, so no public bucket access change is needed. If you prefer a simpler video workflow and accept YouTube branding, use YouTube share/embed links instead.
 
 For long master videos, keep the 1–2 GB file in Google Drive and upload only a short preview clip for the portfolio card. In Admin → Works, paste the Drive share URL into “Full video link”; it is saved separately from the card preview. The project page embeds Drive's preview player when the link is a Drive file link and shows a link to open the original if Drive playback is unavailable. Set the Drive file's General access to “Anyone with the link” as Viewer. Drive playback can take time to process, is limited to 1080p, and anonymous playback can be rate-limited; a dedicated video host/CDN is more reliable for a public portfolio.
 
