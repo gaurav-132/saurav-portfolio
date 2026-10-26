@@ -30,7 +30,7 @@ export async function PATCH(request: Request) {
   try {
     const body = await request.json();
     const { id } = idBody.parse(body);
-    const input = testimonialInput.partial().parse(body);
+    const input = testimonialInput.parse(body);
     const [item] = await context.db.update(testimonials).set(input).where(eq(testimonials.id, id)).returning();
     return item
       ? jsonOk(mapTestimonial(item as unknown as Record<string, unknown>))

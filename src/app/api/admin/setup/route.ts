@@ -49,7 +49,7 @@ export async function POST(request: Request) {
   try {
     body = bodySchema.parse(await request.json());
   } catch {
-    return jsonError('Enter a valid email, the setup token, and a password with at least 12 characters.', 400);
+    return jsonError('Enter a valid email, the setup token, and a password with at least 8 characters.', 400);
   }
 
   if (body.token !== process.env.ADMIN_SETUP_TOKEN) {
