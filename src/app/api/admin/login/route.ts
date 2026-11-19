@@ -37,3 +37,4 @@ export async function POST(request: Request) {
     return jsonError('Please check your details and try again.', 400);
   }
 }
+

@@ -6,23 +6,23 @@ import type { db as database } from '@/db/client';
 export const uploadBucket = () => process.env.R2_BUCKET_NAME || 'uploads';
 
 export function createObjectStorageClient() {
-  const endpoint = process.env.SP_AWS_ENDPOINT_URL_S3;
-  const accessKeyId = process.env.SP_AWS_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.SP_AWS_SECRET_ACCESS_KEY;
-  const region = process.env.SP_AWS_REGION;
+  const endpoint = process.env.SV_AWS_ENDPOINT_URL_S3;
+  const accessKeyId = process.env.SV_AWS_ACCESS_KEY_ID;
+  const secretAccessKey = process.env.SV_AWS_SECRET_ACCESS_KEY;
+  const region = process.env.SV_AWS_REGION;
 
   if (!endpoint || !accessKeyId || !secretAccessKey || !region) {
-    throw new Error('Neon Object Storage is not configured. Set SP_AWS_ENDPOINT_URL_S3, SP_AWS_ACCESS_KEY_ID, SP_AWS_SECRET_ACCESS_KEY, and SP_AWS_REGION.');
+    throw new Error('Neon Object Storage is not configured. Set SV_AWS_ENDPOINT_URL_S3, SV_AWS_ACCESS_KEY_ID, SV_AWS_SECRET_ACCESS_KEY, and SV_AWS_REGION.');
   }
 
   let parsedEndpoint: URL;
   try {
     parsedEndpoint = new URL(endpoint);
   } catch {
-    throw new Error('SP_AWS_ENDPOINT_URL_S3 must be a valid HTTPS endpoint.');
+    throw new Error('SV_AWS_ENDPOINT_URL_S3 must be a valid HTTPS endpoint.');
   }
   if (parsedEndpoint.protocol !== 'https:') {
-    throw new Error('SP_AWS_ENDPOINT_URL_S3 must use HTTPS.');
+    throw new Error('SV_AWS_ENDPOINT_URL_S3 must use HTTPS.');
   }
 
   return new S3Client({
