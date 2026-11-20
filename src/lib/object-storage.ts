@@ -3,7 +3,7 @@ import { eq } from 'drizzle-orm';
 import { mediaAssets, projects } from '@/db/schema';
 import type { db as database } from '@/db/client';
 
-export const uploadBucket = () => process.env.R2_BUCKET_NAME || 'uploads';
+export const uploadBucket = () => process.env.SP_BUCKET_NAME || 'uploads';
 
 export function createObjectStorageClient() {
     const endpoint = process.env.SP_AWS_ENDPOINT_URL_S3;
